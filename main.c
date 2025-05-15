@@ -4,6 +4,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#define DS_IO_IMPLEMENTATION
 #define DS_SS_IMPLEMENTATION
 #define DS_SB_IMPLEMENTATION
 #include "ds.h"
@@ -74,19 +75,22 @@ int main(int argc, char *argv[])
 
     ds_string_slice_tokenize(&request, ' ', &token);
     char *path = NULL;
-    ds_string_slice_to_owned(&request, &path);
-    printf("path requested: %s\n", path);
+    ds_string_slice_to_owned(&token, &path);
 
-    ds_string_slice_tokenize(&request, '\n', &token);
-    char *protocol = NULL;
-    ds_string_slice_to_owned(&token, &protocol);
-    printf("protocol: %s\n", protocol);
+    char *content = NULL;
+    int content_len = ds_io_read_file(path + 1, &content);
+
+    ds_string_builder response_builder;
+    ds_string_builder_init(&response_builder);
+
+    ds_string_builder_append(&response_builder, "HTTP/1.1 200 OK\nContent-Type: text/html\nContent-Length: %d\n\n%s", content_len, content);
     
-    int response_len = snprintf(NULL, response, 0, "%s 200 OK\nContent-Type: text/html\nContent-Length: %d\n\n%s", protocol, 6, "Hello\n")
-    char *response = calloc(response_len, sizeof(char));
-    snprintf(response, 0, "%s 200 OK\nContent-Type: text/html\nContent-Length: %d\n\n%s", protocol, 6, "Hello\n")
+    char *response = NULL;
+    ds_string_builder_build(&response_builder, &response);
+    int response_len = strlen(response);
 
-    write(cfd, "%s 200 OK\nContent-Type: text/html\nContent-Length: %d\n\n%s", 7);
+    // send one message
+    write(cfd, response, response_len);
     }
   result = close(fd);
   if (result == -1) {
