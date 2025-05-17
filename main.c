@@ -4,6 +4,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <dirent.h>
 #define DS_IO_IMPLEMENTATION
 #define DS_SS_IMPLEMENTATION
 #define DS_SB_IMPLEMENTATION
@@ -26,7 +28,7 @@ int main(int argc, char *argv[])
   }
 
   addr.sin_family = AF_INET;
-  addr.sin_port = htons(8000);
+  addr.sin_port = htons(8001);
   inet_pton(AF_INET, "0.0.0.0", &addr.sin_addr);
   result = bind(fd, (struct sockaddr *) &addr, sizeof(addr));
 
@@ -77,9 +79,43 @@ int main(int argc, char *argv[])
     char *path = NULL;
     ds_string_slice_to_owned(&token, &path);
 
-    char *content = NULL;
-    int content_len = ds_io_read_file(path + 1, &content);
+    struct stat path_stat;
+    result = stat(path + 1, &path_stat);
 
+    if (result != 0) {
+      DS_LOG_ERROR("stat");
+      continue;
+    }
+
+    char *content = NULL;
+    int content_len = 0;
+    if (S_ISREG(path_stat.st_mode)) { 
+      content_len = ds_io_read_file(path + 1, &content);
+    } else if (S_ISDIR(path_stat.st_mode)) {
+      ds_string_builder directory_builder;
+      ds_string_builder_init(&directory_builder);
+      ds_string_builder_append(&directory_builder,
+                               "<!DOCTYPE HTML>\n<html lang=\"en\">\n<head>\n<meta "
+                               "charset=\"utf-8\">\n<title>Direcotory listing for "
+                               "%s</title>\n<head>\n"
+                               "<body>\n<h1>Direcotory listing for %s</h1>\n</hr>\n<ul>\n",
+                                path, path);
+      
+      DIR *directory = opendir(path + 1);
+      struct dirent *dir;
+      if (directory) {
+        while ((dir = readdir(directory)) != NULL) {
+          printf("%s\n", dir->d_name);
+          ds_string_builder_append(&directory_builder, "<li><a href=\"%s/%s\">%s</a></li>\n", path + 1, dir->d_name, dir->d_name);
+        }
+        closedir(directory);
+      }
+      ds_string_builder_append(&directory_builder, "</ul>\n</hr>\n</body>\n</html>\n");
+      ds_string_builder_build(&directory_builder, &content);
+      content_len = strlen(content);
+    } else {
+      DS_LOG_ERROR("mode not supported");
+    }
     ds_string_builder response_builder;
     ds_string_builder_init(&response_builder);
 
@@ -91,7 +127,7 @@ int main(int argc, char *argv[])
 
     // send one message
     write(cfd, response, response_len);
-    }
+  }
   result = close(fd);
   if (result == -1) {
     DS_PANIC("close");
